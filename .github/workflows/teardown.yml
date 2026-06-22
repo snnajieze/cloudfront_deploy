@@ -1,0 +1,88 @@
+name: Teardown / Disable Environment
+
+# Satisfies the "accessible to anyone with Internet access, but only
+# during the challenge recording period" requirement. Two modes:
+#
+#   mode = disable  -> sets the CloudFront distribution's `enabled` flag
+#                       to false via Terraform. The distribution and S3
+#                       buckets still exist (fast to re-enable, no data
+#                       loss), but CloudFront stops serving requests
+#                       (returns 403) within a few minutes.
+#
+#   mode = destroy  -> runs `terraform destroy` for the chosen
+#                       environment, tearing down the CloudFront
+#                       distribution and both S3 buckets entirely. Use
+#                       this once the environment is no longer needed at
+#                       all, to avoid any ongoing AWS cost.
+#
+# This is deliberately a manual, human-triggered workflow (no automatic
+# cron) so that recording sessions are never cut off unexpectedly. See
+# docs/accessibility-window.md for the recommended way to schedule this
+# safely around an actual recording.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to act on'
+        required: true
+        type: choice
+        options: [devel, stage]
+      mode:
+        description: 'disable (reversible, keeps state) or destroy (tears everything down)'
+        required: true
+        type: choice
+        options: [disable, destroy]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  teardown:
+    name: ${{ inputs.mode }} ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      AWS_REGION: us-east-1
+      TF_DIR: infra/environments
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Disable CloudFront distribution
+        if: inputs.mode == 'disable'
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: |
+          terraform apply -input=false -auto-approve -var="enabled=false"
+
+      - name: Destroy environment
+        if: inputs.mode == 'destroy'
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: |
+          terraform destroy -input=false -auto-approve
+
+      - name: Summary
+        run: |
+          echo "## ${{ inputs.mode }} completed for ${{ env.ENVIRONMENT }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ inputs.mode }}" == "disable" ]]; then
+            echo "CloudFront distribution is now disabled. Re-run the CD workflow, or re-run this workflow with mode=disable reverted via -var=\"enabled=true\", to bring it back online." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "All resources for this environment have been destroyed." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,162 @@
+name: CI
+
+# Part 1 requirement: triggered for any PR created or updated against the
+# repository. `opened` covers PR creation; `synchronize` covers new commits
+# pushed to an existing PR; `reopened` covers a closed PR being reopened.
+# We scope this to PRs targeting the protected branches (devel, stage) so
+# the pipeline runs wherever real review/merge decisions are being made.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - devel
+      - stage
+
+# Cancel superseded runs from older pushes to the same PR, so feedback
+# always reflects the latest commit instead of queuing stale runs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  install:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: npm install
+        run: npm install
+
+      - name: Cache node_modules for downstream jobs
+        uses: actions/cache@v4
+        with:
+          path: app/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}-${{ github.run_id }}
+
+  lint:
+    name: Lint (ESLint)
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Restore node_modules
+        uses: actions/cache@v4
+        with:
+          path: app/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}-${{ github.run_id }}
+
+      - name: npm run lint
+        run: npm run lint
+
+  test:
+    name: Test (Jest)
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Restore node_modules
+        uses: actions/cache@v4
+        with:
+          path: app/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}-${{ github.run_id }}
+
+      - name: CI=true npm run test
+        run: CI=true npm run test -- --ci --coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-coverage
+          path: app/coverage
+          retention-days: 14
+
+  build:
+    name: Build
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Restore node_modules
+        uses: actions/cache@v4
+        with:
+          path: app/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}-${{ github.run_id }}
+
+      - name: npm run build
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-dist-${{ github.event.pull_request.head.sha }}
+          path: app/dist
+          retention-days: 14
+
+  # Single required status check that PR branch protection can target,
+  # regardless of which individual jobs ran or were skipped.
+  ci-status:
+    name: CI Summary
+    if: always()
+    needs: [install, lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report pipeline result
+        run: |
+          echo "## CI Pipeline Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Install dependencies | ${{ needs.install.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Lint (ESLint) | ${{ needs.lint.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test (Jest) | ${{ needs.test.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | ${{ needs.build.result }} |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${{ needs.install.result }}" != "success" || \
+                "${{ needs.lint.result }}" != "success" || \
+                "${{ needs.test.result }}" != "success" || \
+                "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more CI steps failed. See the job logs above for details." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "All CI steps passed." >> "$GITHUB_STEP_SUMMARY"

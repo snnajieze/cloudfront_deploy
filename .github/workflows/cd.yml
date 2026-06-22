@@ -1,0 +1,140 @@
+name: CD
+
+# Part 2 requirement: deploy via Terraform whenever changes land on devel
+# or stage. Both branches are protected (see docs/branch-protection.md),
+# so a push event here only ever happens as the result of a merged,
+# CI-passed pull request - never a direct push.
+on:
+  push:
+    branches:
+      - devel
+      - stage
+  # Allows a human to re-run a deploy for a given environment without an
+  # empty commit, e.g. after rotating credentials or fixing a one-off AWS
+  # console drift.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (devel or stage)'
+        required: true
+        type: choice
+        options: [devel, stage]
+
+permissions:
+  id-token: write   # for OIDC auth to AWS (no long-lived AWS keys in CI)
+  contents: read
+
+concurrency:
+  # Only one deploy per environment at a time, queue rather than cancel
+  # (cancelling a half-applied terraform apply can corrupt state).
+  group: cd-${{ github.event.inputs.environment || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-environment:
+    name: Resolve target environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+    steps:
+      - id: resolve
+        run: |
+          if [[ -n "${{ github.event.inputs.environment }}" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy (${{ needs.resolve-environment.outputs.environment }})
+    needs: resolve-environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-environment.outputs.environment }}
+    env:
+      ENVIRONMENT: ${{ needs.resolve-environment.outputs.environment }}
+      AWS_REGION: us-east-1
+      TF_DIR: infra/environments
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- Build the application -------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm install
+
+      - name: Build app for ${{ env.ENVIRONMENT }}
+        working-directory: app
+        env:
+          VITE_APP_ENV: ${{ env.ENVIRONMENT }}
+        run: npm run build
+
+      # --- Provision infrastructure -----------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Capture Terraform outputs
+        id: tf_outputs
+        working-directory: ${{ env.TF_DIR }}/${{ env.ENVIRONMENT }}
+        run: |
+          echo "bucket_id=$(terraform output -raw bucket_id)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(terraform output -raw distribution_id)" >> "$GITHUB_OUTPUT"
+          echo "site_url=$(terraform output -raw site_url)" >> "$GITHUB_OUTPUT"
+
+      # --- Ship the build to S3 and invalidate the CDN ----------------
+      - name: Sync build output to S3
+        run: |
+          aws s3 sync app/dist "s3://${{ steps.tf_outputs.outputs.bucket_id }}" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          # index.html must always be revalidated so deploys show up
+          # immediately instead of waiting out a long-lived cache header.
+          aws s3 cp app/dist/index.html "s3://${{ steps.tf_outputs.outputs.bucket_id }}/index.html" \
+            --cache-control "public,max-age=0,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf_outputs.outputs.distribution_id }}" \
+            --paths "/*"
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployed ${{ env.ENVIRONMENT }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**URL:** ${{ steps.tf_outputs.outputs.site_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**S3 bucket:** ${{ steps.tf_outputs.outputs.bucket_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**CloudFront distribution:** ${{ steps.tf_outputs.outputs.distribution_id }}" >> "$GITHUB_STEP_SUMMARY"

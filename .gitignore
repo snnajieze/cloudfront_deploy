@@ -1,0 +1,27 @@
+# Node / app
+app/node_modules/
+app/dist/
+app/coverage/
+app/.env
+app/.env.local
+*.log
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Note: .terraform.lock.hcl is intentionally NOT ignored - it pins
+# provider versions and should be committed (Terraform best practice).
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

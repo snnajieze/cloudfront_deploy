@@ -1,0 +1,62 @@
+name: Branch Policy
+
+# Enforces the branching strategy required by the challenge, as a status
+# check on every PR (set this job as a required check in branch
+# protection for devel and stage - see docs/branch-protection.md):
+#
+#   -> stage  : the PR's head branch MUST be devel. No other branch
+#                (not even a hotfix/* or feature/* branch) may merge
+#                directly into stage.
+#   -> devel  : the PR's head branch MUST be a feature/* or bugfix/*
+#                branch (i.e. NOT stage, and not devel itself, and not a
+#                random branch name - keeps the "all new work happens in
+#                a feature/bugfix branch" rule enforced by automation
+#                rather than convention alone).
+#
+# Direct pushes to devel/stage are separately blocked by GitHub branch
+# protection ("Require a pull request before merging"), so by the time
+# this check runs we already know we're looking at a real PR.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches:
+      - devel
+      - stage
+
+jobs:
+  check-branch-policy:
+    name: Validate source/target branch combination
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate policy
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "PR wants to merge '$HEAD_REF' into '$BASE_REF'"
+
+          if [[ "$BASE_REF" == "stage" ]]; then
+            if [[ "$HEAD_REF" != "devel" ]]; then
+              echo "::error::Only the 'devel' branch may be merged into 'stage'. This PR's source branch is '$HEAD_REF', which is not allowed."
+              exit 1
+            fi
+            echo "OK: devel -> stage is an allowed merge."
+            exit 0
+          fi
+
+          if [[ "$BASE_REF" == "devel" ]]; then
+            if [[ "$HEAD_REF" == "stage" ]]; then
+              echo "::error::'stage' may not be merged back into 'devel'."
+              exit 1
+            fi
+            if [[ ! "$HEAD_REF" =~ ^(feature|bugfix)\/.+ ]]; then
+              echo "::error::Branches merging into 'devel' must be named 'feature/<name>' or 'bugfix/<name>'. Got '$HEAD_REF'."
+              exit 1
+            fi
+            echo "OK: $HEAD_REF -> devel is an allowed merge."
+            exit 0
+          fi
+
+          echo "::error::Unrecognized base branch '$BASE_REF'."
+          exit 1
