@@ -140,3 +140,5 @@ All four passed cleanly during development of this repo (6/6 Jest tests,
 - **SPA-friendly routing**: CloudFront's `custom_error_response` rewrites
   403/404 to `/index.html` so client-side routes resolve correctly
   even though the S3 origin has no static-website hosting config.
+
+  # Check deployment...
