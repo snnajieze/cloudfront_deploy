@@ -182,12 +182,32 @@ data "aws_iam_policy_document" "github_actions_permissions" {
 
   statement {
     sid = "ManageProjectS3Buckets"
+
     actions = [
-      "s3:*",
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:ListBucket",
+
+      "s3:GetBucketLocation",
+      "s3:GetBucketVersioning",
+      "s3:GetBucketPolicy",
+      "s3:GetBucketAcl",
+      "s3:GetBucketWebsite",
+      "s3:GetBucketLogging",
+      "s3:GetBucketTagging",
+      "s3:GetBucketPublicAccessBlock",
+
+      "s3:GetEncryptionConfiguration",
+      "s3:PutEncryptionConfiguration",
+
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject"
     ]
+
     resources = [
       "arn:aws:s3:::${var.project_name}-*",
-      "arn:aws:s3:::${var.project_name}-*/*",
+      "arn:aws:s3:::${var.project_name}-*/*"
     ]
   }
 
