@@ -191,6 +191,8 @@ data "aws_iam_policy_document" "github_actions_permissions" {
       "s3:PutBucketOwnershipControls",
       "s3:PutBucketPublicAccessBlock",
       "s3:PutBucketVersioning",
+      "s3:PutBucketTagging",
+      "s3:GetBucketTagging",
       "s3:PutEncryptionConfiguration",
       "s3:PutLifecycleConfiguration",
       "s3:GetBucket*",
