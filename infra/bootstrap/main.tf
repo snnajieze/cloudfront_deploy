@@ -182,32 +182,13 @@ data "aws_iam_policy_document" "github_actions_permissions" {
 
   statement {
     sid = "ManageProjectS3Buckets"
-
-    actions = [
-      "s3:CreateBucket",
-      "s3:DeleteBucket",
-      "s3:ListBucket",
-
-      "s3:GetBucketLocation",
-      "s3:GetBucketVersioning",
-      "s3:GetBucketPolicy",
-      "s3:GetBucketAcl",
-      "s3:GetBucketWebsite",
-      "s3:GetBucketLogging",
-      "s3:GetBucketTagging",
-      "s3:GetBucketPublicAccessBlock",
-
-      "s3:GetEncryptionConfiguration",
-      "s3:PutEncryptionConfiguration",
-
-      "s3:GetObject",
-      "s3:PutObject",
-      "s3:DeleteObject"
-    ]
-
+    # s3:* is intentionally broad here but scoped tightly to project
+    # buckets only via the resources block. This avoids chasing individual
+    # missing permissions as the AWS provider evolves.
+    actions = ["s3:*"]
     resources = [
       "arn:aws:s3:::${var.project_name}-*",
-      "arn:aws:s3:::${var.project_name}-*/*"
+      "arn:aws:s3:::${var.project_name}-*/*",
     ]
   }
 
