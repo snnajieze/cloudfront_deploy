@@ -29,12 +29,12 @@ resource "aws_cloudfront_distribution" "this" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    # Managed cache/origin-request policies (no need to declare a custom
-    # cache_policy resource for a simple static-site use case):
+    # Managed cache policy (no need to declare a custom cache_policy
+    # resource for a simple static-site use case):
     #   CachingOptimized: 658327ea-f89d-4fab-a63d-7e88639e58f6
-    #   CORS-S3Origin:    88a5eaf4-2f7a-4f8b-9c46-8c48c0a17bf1
-    cache_policy_id          = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-    origin_request_policy_id = "88a5eaf4-2f7a-4f8b-9c46-8c48c0a17bf1"
+    # No origin_request_policy_id needed — OAC handles request signing
+    # to the private S3 origin directly.
+    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
   # The sample app is a client-side-routed single page app. Any path not
