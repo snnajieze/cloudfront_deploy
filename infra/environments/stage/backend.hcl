@@ -8,7 +8,7 @@
 # into version control - it contains no secrets, only the location of
 # the (already access-controlled) state bucket.
 
-bucket       = "fsl-devops-challenge-tfstate-<ACCOUNT_ID>"
+bucket       = "fsl-devops-challenge-tfstate-399021807094"
 key          = "environments/stage/terraform.tfstate"
 region       = "us-east-1"
 encrypt      = true
