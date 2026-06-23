@@ -194,21 +194,9 @@ data "aws_iam_policy_document" "github_actions_permissions" {
 
   statement {
     sid = "ManageCloudFront"
-    actions = [
-      "cloudfront:CreateDistribution",
-      "cloudfront:UpdateDistribution",
-      "cloudfront:DeleteDistribution",
-      "cloudfront:GetDistribution",
-      "cloudfront:GetDistributionConfig",
-      "cloudfront:ListDistributions",
-      "cloudfront:TagResource",
-      "cloudfront:CreateOriginAccessControl",
-      "cloudfront:GetOriginAccessControl",
-      "cloudfront:UpdateOriginAccessControl",
-      "cloudfront:DeleteOriginAccessControl",
-      "cloudfront:CreateInvalidation",
-      "cloudfront:GetInvalidation",
-    ]
+    # cloudfront:* is intentionally broad but CloudFront resources are
+    # already account-scoped; there are no cross-account blast-radius risks.
+    actions   = ["cloudfront:*"]
     resources = ["*"]
   }
 
